@@ -32,7 +32,12 @@ elseif is_config("backend", "Kotlin") then
     -- Set SCRIPTX_KOTLIN_CLASSPATH to the host jar plus filtered Kotlin runtime
     -- jars. CMake performs this discovery and host-jar build automatically.
     local classpath = os.getenv("SCRIPTX_KOTLIN_CLASSPATH")
-    if classpath then add_defines("SCRIPTX_KOTLIN_CLASSPATH=\"" .. classpath .. "\"") end
+    if classpath then
+        -- The value becomes a C++ string literal. Use forward slashes so Windows
+        -- drive paths do not turn into invalid C++ escape sequences.
+        classpath = classpath:gsub("\\", "/")
+        add_defines("SCRIPTX_KOTLIN_CLASSPATH=\"" .. classpath .. "\"")
+    end
     add_includedirs(path.join(java_home, "include"))
     if is_host("windows") then
         add_includedirs(path.join(java_home, "include", "win32"))
