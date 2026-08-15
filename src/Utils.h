@@ -32,6 +32,7 @@ enum class ScriptLanguage {
   kLua,
   kPython,
   kRuby,
+  kKotlin,
   // and more
 };
 

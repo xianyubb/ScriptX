@@ -14,7 +14,7 @@ ScriptX是一个脚本引擎抽象层。对下封装多种脚本引擎，对上�
 
 ScriptX不仅隔离了几种JavaScript引擎，甚至可以隔离不同脚本语言，使得**上层仅需修改一个编译选项即可无缝切换脚本引擎和脚本语言**。
 
-ScriptX的术语中，"前端"指对外的C++ API，"后端"则指不同的底层引擎，目前已经实现的后端有：V8, node.js, JavaScriptCore, WebAssembly, Lua.
+ScriptX的术语中，"前端"指对外的C++ API，"后端"则指不同的底层引擎，目前已经实现的后端有：V8, node.js, JavaScriptCore, WebAssembly, Lua，以及在进程内嵌入 JVM 的实验性 Kotlin 后端。
 
 # 状态
 
@@ -27,6 +27,7 @@ ScriptX的术语中，"前端"指对外的C++ API，"后端"则指不同的底�
 | WebAssembly | JavaScript | Emscripten-2.0.5+ | done |
 | Lua | Lua | 5.4+ | done |
 | CPython | Python |  | todo |
+| Kotlin/JVM（嵌入式） | Kotlin/JVM 脚本 | `PATH` 中的 Kotlin 编译器和 JDK/JVM | experimental |
 | YARV | Ruby |  | todo |
 | Mono | C# |  | todo |
 
@@ -160,6 +161,7 @@ root
 │   └── ...
 ├── backend
 │   ├── JavaScriptCore
+│   ├── Kotlin
 │   ├── Lua
 │   ├── Python
 │   ├── QuickJs

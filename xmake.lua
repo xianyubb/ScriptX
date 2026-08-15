@@ -11,14 +11,48 @@ elseif is_config("backend", "QuickJs") then
 elseif is_config("backend", "Python") then
     add_requires("python 3.12.10", {configs={shared=true}})
 
+elseif is_config("backend", "Kotlin") then
+    -- Kotlin embeds a JVM. xmake has no built-in Kotlin toolchain, so discover the
+    -- same JDK/Kotlin distribution used by CMake; provide the host classpath below.
+    local java_home = os.getenv("JAVA_HOME")
+    local kotlin_home = os.getenv("KOTLIN_HOME")
+    -- On Windows, JAVA_HOME/KOTLIN_HOME are the portable configuration. Keep
+    -- the common local installation locations as a convenience fallback.
+    if not java_home and is_host("windows") and os.isdir("C:/Program Files/Zulu/zulu-21") then
+        java_home = "C:/Program Files/Zulu/zulu-21"
+    end
+    if not kotlin_home and is_host("windows") and os.isdir("D:/kotlinc") then
+        kotlin_home = "D:/kotlinc"
+    end
+    if not java_home or not kotlin_home then
+        raise("Kotlin backend requires JAVA_HOME/KOTLIN_HOME or java/kotlinc in PATH")
+    end
+    -- Set SCRIPTX_KOTLIN_CLASSPATH to the host jar plus filtered Kotlin runtime
+    -- jars. CMake performs this discovery and host-jar build automatically.
+    local classpath = os.getenv("SCRIPTX_KOTLIN_CLASSPATH")
+    if classpath then add_defines("SCRIPTX_KOTLIN_CLASSPATH=\"" .. classpath .. "\"") end
+    add_includedirs(path.join(java_home, "include"))
+    if is_host("windows") then
+        add_includedirs(path.join(java_home, "include", "win32"))
+        add_linkdirs(path.join(java_home, "lib"))
+        add_links("jvm")
+    elseif is_host("linux") then
+        add_includedirs(path.join(java_home, "include", "linux"))
+        add_linkdirs(path.join(java_home, "lib", "server"))
+        add_links("jvm")
+    elseif is_host("macosx") then
+        add_includedirs(path.join(java_home, "include", "darwin"))
+        add_linkdirs(path.join(java_home, "lib", "server"))
+        add_links("jvm")
+    end
+
 elseif is_config("backend", "V8") then
     add_requires("node v22.12.0", {configs={shared=true}})
-    
 end
 
 option("backend")
     set_default("Lua")
-    set_values("Lua", "QuickJs", "Python", "V8")
+    set_values("Lua", "QuickJs", "Python", "Kotlin", "V8")
 
 target("ScriptX")
     add_files(
@@ -81,6 +115,14 @@ target("ScriptX")
         )
         add_packages(
             "node"
+        )
+
+    elseif is_config("backend", "Kotlin") then
+        add_defines(
+            "SCRIPTX_BACKEND_TRAIT_PREFIX=../backend/Kotlin/trait/Trait"
+        )
+        add_files(
+            "backend/Kotlin/**.cc"
         )
 
     end
