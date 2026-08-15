@@ -13,7 +13,7 @@ ScriptX is a script engine abstraction layer. A variety of script engines are en
 
 ScriptX not only isolates several JavaScript engines, but can even isolate different scripting languages, so that **the upper layer can seamlessly switch between scripting engine and scripting language without changing the code**.
 
-In ScriptX terminology, "front-end" refers to the external C++ API, and "back-end" refers to different underlying engines. The currently implemented back-ends include: V8, node.js, JavaScriptCore, WebAssembly, Lua.
+In ScriptX terminology, "front-end" refers to the external C++ API, and "back-end" refers to different underlying engines. The currently implemented back-ends include: V8, node.js, JavaScriptCore, WebAssembly, Lua, and an embedded Kotlin/JVM backend.
 
 # States
 
@@ -26,6 +26,7 @@ In ScriptX terminology, "front-end" refers to the external C++ API, and "back-en
 | WebAssembly | JavaScript | Emscripten-2.0.5+ | done |
 | Lua | Lua | 5.4+ | done |
 | CPython | Python |  | todo |
+| Kotlin/JVM (embedded) | Kotlin/JVM scripts | Kotlin compiler and JDK/JVM | experimental |
 | YARV | Ruby |  | todo |
 | Mono | C# |  | todo |
 
@@ -163,6 +164,7 @@ root
 │ └── ...
 ├── backend
 │ ├── JavaScriptCore
+│ ├── Kotlin
 │ ├── Lua
 │ ├── Python
 │ ├── QuickJs

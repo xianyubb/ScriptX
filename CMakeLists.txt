@@ -21,6 +21,7 @@ set(SCRIPTX_BACKEND_WEBASSEMBLY WebAssembly)
 set(SCRIPTX_BACKEND_WKWEBVIEW WKWebView)
 set(SCRIPTX_BACKEND_LUA Lua)
 set(SCRIPTX_BACKEND_PYTHON Python)
+set(SCRIPTX_BACKEND_KOTLIN Kotlin)
 set(SCRIPTX_BACKEND_RUBY Ruby)
 # Empty is for you to compile against ScriptX but don't keep any real implementations
 set(SCRIPTX_BACKEND_EMPTY Empty)
@@ -34,6 +35,7 @@ set(SCRIPTX_BACKEND_LIST
         ${SCRIPTX_BACKEND_WKWEBVIEW}
         ${SCRIPTX_BACKEND_LUA}
         ${SCRIPTX_BACKEND_PYTHON}
+        ${SCRIPTX_BACKEND_KOTLIN}
         ${SCRIPTX_BACKEND_RUBY}
         ${SCRIPTX_BACKEND_EMPTY}
         )
@@ -145,6 +147,13 @@ elseif (${SCRIPTX_BACKEND} STREQUAL ${SCRIPTX_BACKEND_PYTHON})
     include(${SCRIPTX_DIR}/backend/Python/CMakeLists.txt)
     add_definitions(
             -DSCRIPTX_BACKEND_TRAIT_PREFIX=../backend/Python/trait/Trait
+    )
+
+elseif (${SCRIPTX_BACKEND} STREQUAL ${SCRIPTX_BACKEND_KOTLIN})
+
+    include(${SCRIPTX_DIR}/backend/Kotlin/CMakeLists.txt)
+    add_definitions(
+            -DSCRIPTX_BACKEND_TRAIT_PREFIX=../backend/Kotlin/trait/Trait
     )
 
 elseif (${SCRIPTX_BACKEND} STREQUAL ${SCRIPTX_BACKEND_RUBY})
