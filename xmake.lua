@@ -2,6 +2,8 @@ add_rules("mode.debug", "mode.release")
 
 add_repositories("levimc-repo https://github.com/LiteLDev/xmake-repo.git")
 
+local kotlin_jvm_linkdir = nil
+
 if is_config("backend", "Lua") then
     add_requires("lua v5.5.0", {configs={shared=true}})
 
@@ -34,16 +36,13 @@ elseif is_config("backend", "Kotlin") then
     add_includedirs(path.join(java_home, "include"))
     if is_host("windows") then
         add_includedirs(path.join(java_home, "include", "win32"))
-        add_linkdirs(path.join(java_home, "lib"))
-        add_links("jvm")
+        kotlin_jvm_linkdir = path.join(java_home, "lib")
     elseif is_host("linux") then
         add_includedirs(path.join(java_home, "include", "linux"))
-        add_linkdirs(path.join(java_home, "lib", "server"))
-        add_links("jvm")
+        kotlin_jvm_linkdir = path.join(java_home, "lib", "server")
     elseif is_host("macosx") then
         add_includedirs(path.join(java_home, "include", "darwin"))
-        add_linkdirs(path.join(java_home, "lib", "server"))
-        add_links("jvm")
+        kotlin_jvm_linkdir = path.join(java_home, "lib", "server")
     end
 
 elseif is_config("backend", "V8") then
@@ -124,5 +123,9 @@ target("ScriptX")
         add_files(
             "backend/Kotlin/**.cc"
         )
+        -- ScriptX is static. Propagate the JVM import library to targets
+        -- linking ScriptX, otherwise JNI_CreateJavaVM remains unresolved.
+        add_linkdirs(kotlin_jvm_linkdir, {public = true})
+        add_links("jvm", {public = true})
 
     end
