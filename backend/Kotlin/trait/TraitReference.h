@@ -5,6 +5,7 @@
 
 namespace script::kotlin_backend {
 struct KotlinValue;
+struct KotlinWeakValue;
 }
 
 namespace script::internal {
@@ -20,6 +21,6 @@ struct ImplType<Global<T>> {
 
 template <typename T>
 struct ImplType<Weak<T>> {
-  using type = std::weak_ptr<kotlin_backend::KotlinValue>;
+  using type = std::shared_ptr<kotlin_backend::KotlinWeakValue>;
 };
 }  // namespace script::internal

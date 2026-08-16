@@ -23,6 +23,7 @@ elseif is_config("backend", "Kotlin") then
     if not java_home and is_host("windows") and os.isdir("C:/Program Files/Zulu/zulu-21") then
         java_home = "C:/Program Files/Zulu/zulu-21"
     end
+
     if not kotlin_home and is_host("windows") and os.isdir("D:/kotlinc") then
         kotlin_home = "D:/kotlinc"
     end
@@ -125,8 +126,19 @@ target("ScriptX")
         add_defines(
             "SCRIPTX_BACKEND_TRAIT_PREFIX=../backend/Kotlin/trait/Trait"
         )
+        add_includedirs(path.join(java_home, "include"))
+        if is_plat("windows") then
+            add_includedirs(path.join(java_home, "include", "win32"))
+        elseif is_plat("linux") then
+            add_includedirs(path.join(java_home, "include", "linux"))
+        elseif is_plat("macosx") then
+            add_includedirs(path.join(java_home, "include", "darwin"))
+        end
         add_files(
             "backend/Kotlin/**.cc"
+        )
+        remove_files(
+            "backend/Kotlin/tests/**.cc"
         )
         -- ScriptX is static. Propagate the JVM import library to targets
         -- linking ScriptX, otherwise JNI_CreateJavaVM remains unresolved.
@@ -134,3 +146,16 @@ target("ScriptX")
         add_links("jvm", {public = true})
 
     end
+
+if is_config("backend", "Kotlin") then
+    target("kotlin_backend_smoke")
+        set_kind("binary")
+        set_default(false)
+        set_languages("cxx20")
+        add_files("backend/Kotlin/tests/KotlinBackendSmoke.cc")
+        add_includedirs("src/include/")
+        add_defines("SCRIPTX_BACKEND_TRAIT_PREFIX=../backend/Kotlin/trait/Trait")
+        add_deps("ScriptX")
+        add_linkdirs(kotlin_jvm_linkdir)
+        add_links("jvm")
+end

@@ -3,7 +3,6 @@
 #include <ScriptX/ScriptX.h>
 
 #include <filesystem>
-#include <fstream>
 #include <sstream>
 #include <cstdint>
 
@@ -60,26 +59,55 @@ Local<Value> KotlinEngine::eval(const Local<String>& script, const Local<String>
 }
 
 Local<Value> KotlinEngine::loadFile(const Local<String>& scriptFile) {
-  const auto path = scriptFile.toString();
-  std::ifstream stream(path, std::ios::binary);
-  if (!stream) throw Exception("Kotlin script file not found: " + path);
-  std::string source{std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
-  return eval(String::newString(source), scriptFile);
+  const std::filesystem::path path(scriptFile.toString());
+  if (path.empty() || !std::filesystem::is_regular_file(path)) {
+    throw Exception("Kotlin JAR file not found: " + path.string());
+  }
+  auto extension = path.extension().string();
+  std::transform(extension.begin(), extension.end(), extension.begin(),
+                 [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+  if (extension != ".jar") {
+    throw Exception("Kotlin backend is JAR-only; loadFile accepts a compiled .jar, not " +
+                    path.extension().string());
+  }
+  return KotlinInterop::toLocal<Value>(
+      wrapValue(KotlinRuntime::instance().loadJar(host_, path.string())));
 }
 
 std::shared_ptr<utils::MessageQueue> KotlinEngine::messageQueue() { return queue_; }
 
 void KotlinEngine::gc() {
-  // The embedded JVM owns the actual object graph and performs GC independently.
+  if (host_) KotlinRuntime::instance().gc(host_);
 }
 
-size_t KotlinEngine::getHeapSize() { return 0; }
+size_t KotlinEngine::getHeapSize() {
+  const auto jvmBytes = host_ ? KotlinRuntime::instance().heapSize(host_) : 0;
+  const auto associated = associatedMemory_.load();
+  if (associated <= 0) return jvmBytes;
+  return jvmBytes + static_cast<size_t>(associated);
+}
 
 void KotlinEngine::adjustAssociatedMemory(int64_t count) { associatedMemory_ += count; }
 
 ScriptLanguage KotlinEngine::getLanguageType() { return ScriptLanguage::kKotlin; }
 
 std::string KotlinEngine::getEngineVersion() { return KotlinRuntime::instance().version(); }
+
+int64_t KotlinEngine::loadCompiledPlugin(const std::string& jarPath, const std::string& mainClass,
+                                         const std::string& pluginName) {
+  if (destroying_) throw Exception("Kotlin engine is being destroyed");
+  return KotlinRuntime::instance().loadCompiledPlugin(host_, jarPath, mainClass, pluginName);
+}
+
+void KotlinEngine::enableCompiledPlugin(int64_t pluginHandle) {
+  if (destroying_ || !host_ || !pluginHandle) return;
+  KotlinRuntime::instance().enableCompiledPlugin(host_, pluginHandle);
+}
+
+void KotlinEngine::unloadCompiledPlugin(int64_t pluginHandle) {
+  if (!host_ || !pluginHandle) return;
+  KotlinRuntime::instance().unloadCompiledPlugin(host_, pluginHandle);
+}
 
 void KotlinEngine::performRegisterNativeClass(internal::TypeIndex typeIndex,
                                               const internal::ClassDefineState* classDefine,
@@ -88,6 +116,8 @@ void KotlinEngine::performRegisterNativeClass(internal::TypeIndex typeIndex,
   static_cast<void>(instanceTypeToScriptClass);
   const auto classId = static_cast<int64_t>(reinterpret_cast<uintptr_t>(classDefine));
   const auto prefix = "__scriptx_native_" + std::to_string(reinterpret_cast<uintptr_t>(classDefine));
+  const auto apiPrefix = "__scriptx_api_" + classDefine->className;
+  KotlinRuntime::instance().registerNativeClass(host_, classId, classDefine->className);
   std::ostringstream prelude;
 
   auto instancePrelude = [&]() {
@@ -96,17 +126,19 @@ void KotlinEngine::performRegisterNativeClass(internal::TypeIndex typeIndex,
         << "Instance(private val __native: ScriptXKotlinHost.NativeInstance) {\n";
     out << "fun __scriptxNativeInstance(): ScriptXKotlinHost.NativeInstance = __native\n";
     for (const auto& function : classDefine->instanceDefine.functions) {
-      out << "fun " << function.name << "(vararg args: Any?): Any? = " << prefix << "_i_"
-          << function.name << "(__native.pointer(), __native, *args)\n";
+      out << "fun " << function.name << "(vararg args: Any?): Any? = __scriptxHost.call(\""
+          << prefix << "_i_" << function.name << "\", __native.pointer(), __native, *args)\n";
     }
     for (const auto& property : classDefine->instanceDefine.properties) {
-      out << "var " << property.name << ": Any?\n";
+      out << (property.getter && !property.setter ? "val " : "var ") << property.name << ": Any?";
+      if (!property.getter) out << " = null";
+      out << "\n";
       if (property.getter)
-        out << " get() = " << prefix << "_i_" << property.name
-            << "_get(__native.pointer(), __native)\n";
+        out << " get() = __scriptxHost.call(\"" << prefix << "_i_" << property.name
+            << "_get\", __native.pointer(), __native)\n";
       if (property.setter)
-        out << " set(value) { " << prefix << "_i_" << property.name
-            << "_set(__native.pointer(), __native, value) }\n";
+        out << " set(value) { __scriptxHost.call(\"" << prefix << "_i_" << property.name
+            << "_set\", __native.pointer(), __native, value) }\n";
     }
     out << "}\n";
     return out.str();
@@ -116,14 +148,17 @@ void KotlinEngine::performRegisterNativeClass(internal::TypeIndex typeIndex,
     auto constructor = createNativeConstructor(
         this, classId, classDefine->instanceDefine.constructor);
     auto wrapped = wrapValue(constructor, ValueKind::kFunction);
-    KotlinRuntime::instance().set(host_, prefix + "_ctor", wrapped->object);
+    KotlinRuntime::instance().setNative(host_, prefix + "_ctor", wrapped->object);
+    KotlinRuntime::instance().setNative(host_, apiPrefix + "_ctor", wrapped->object);
     prelude << instancePrelude();
   }
 
   for (const auto& function : classDefine->staticDefine.functions) {
     auto callback = createNativeFunction(this, function.callback);
     auto wrapped = wrapValue(callback, ValueKind::kFunction);
-    KotlinRuntime::instance().set(host_, prefix + "_s_" + function.name, wrapped->object);
+    KotlinRuntime::instance().setNative(host_, prefix + "_s_" + function.name, wrapped->object);
+    KotlinRuntime::instance().setNative(
+        host_, apiPrefix + "_s_" + function.name, wrapped->object);
   }
   for (const auto& property : classDefine->staticDefine.properties) {
     if (property.getter) {
@@ -131,7 +166,10 @@ void KotlinEngine::performRegisterNativeClass(internal::TypeIndex typeIndex,
         return getter();
       });
       auto wrapped = wrapValue(callback, ValueKind::kFunction);
-      KotlinRuntime::instance().set(host_, prefix + "_s_" + property.name + "_get", wrapped->object);
+      KotlinRuntime::instance().setNative(host_, prefix + "_s_" + property.name + "_get",
+                                          wrapped->object);
+      KotlinRuntime::instance().setNative(
+          host_, apiPrefix + "_s_" + property.name + "_get", wrapped->object);
     }
     if (property.setter) {
       auto callback = createNativeFunction(this, [setter = property.setter](const Arguments& args) {
@@ -139,7 +177,10 @@ void KotlinEngine::performRegisterNativeClass(internal::TypeIndex typeIndex,
         return Local<Value>();
       });
       auto wrapped = wrapValue(callback, ValueKind::kFunction);
-      KotlinRuntime::instance().set(host_, prefix + "_s_" + property.name + "_set", wrapped->object);
+      KotlinRuntime::instance().setNative(host_, prefix + "_s_" + property.name + "_set",
+                                          wrapped->object);
+      KotlinRuntime::instance().setNative(
+          host_, apiPrefix + "_s_" + property.name + "_set", wrapped->object);
     }
   }
 
@@ -154,7 +195,9 @@ void KotlinEngine::performRegisterNativeClass(internal::TypeIndex typeIndex,
       return function(pointer, forwarded);
     });
     auto wrapped = wrapValue(callback, ValueKind::kFunction);
-    KotlinRuntime::instance().set(host_, prefix + "_i_" + function.name, wrapped->object);
+    KotlinRuntime::instance().setNative(host_, prefix + "_i_" + function.name, wrapped->object);
+    KotlinRuntime::instance().setNative(
+        host_, apiPrefix + "_i_" + function.name, wrapped->object);
   }
   for (const auto& property : classDefine->instanceDefine.properties) {
     if (property.getter) {
@@ -164,7 +207,10 @@ void KotlinEngine::performRegisterNativeClass(internal::TypeIndex typeIndex,
         return getter(pointer);
       });
       auto wrapped = wrapValue(callback, ValueKind::kFunction);
-      KotlinRuntime::instance().set(host_, prefix + "_i_" + property.name + "_get", wrapped->object);
+      KotlinRuntime::instance().setNative(host_, prefix + "_i_" + property.name + "_get",
+                                          wrapped->object);
+      KotlinRuntime::instance().setNative(
+          host_, apiPrefix + "_i_" + property.name + "_get", wrapped->object);
     }
     if (property.setter) {
       auto callback = createNativeFunction(this, [setter = property.setter](const Arguments& args) {
@@ -174,7 +220,10 @@ void KotlinEngine::performRegisterNativeClass(internal::TypeIndex typeIndex,
         return Local<Value>();
       });
       auto wrapped = wrapValue(callback, ValueKind::kFunction);
-      KotlinRuntime::instance().set(host_, prefix + "_i_" + property.name + "_set", wrapped->object);
+      KotlinRuntime::instance().setNative(host_, prefix + "_i_" + property.name + "_set",
+                                          wrapped->object);
+      KotlinRuntime::instance().setNative(
+          host_, apiPrefix + "_i_" + property.name + "_set", wrapped->object);
     }
   }
 
@@ -182,18 +231,23 @@ void KotlinEngine::performRegisterNativeClass(internal::TypeIndex typeIndex,
   object << "class " << prefix << "Class {\n";
   if (classDefine->instanceDefine.constructor) {
     object << "operator fun invoke(vararg args: Any?): " << prefix
-           << "Instance = " << prefix << "Instance(" << prefix
-           << "_ctor(*args) as ScriptXKotlinHost.NativeInstance)\n";
+           << "Instance = " << prefix << "Instance(__scriptxHost.call(\"" << prefix
+           << "_ctor\", *args) as ScriptXKotlinHost.NativeInstance)\n";
   }
   for (const auto& function : classDefine->staticDefine.functions)
-    object << "fun " << function.name << "(vararg args: Any?): Any? = " << prefix << "_s_"
-           << function.name << "(*args)\n";
+    object << "fun " << function.name
+           << "(vararg args: Any?): Any? = __scriptxHost.call(\"" << prefix << "_s_"
+           << function.name << "\", *args)\n";
   for (const auto& property : classDefine->staticDefine.properties) {
-    object << "var " << property.name << ": Any?\n";
+    object << (property.getter && !property.setter ? "val " : "var ") << property.name << ": Any?";
+    if (!property.getter) object << " = null";
+    object << "\n";
     if (property.getter)
-      object << " get() = " << prefix << "_s_" << property.name << "_get()\n";
+      object << " get() = __scriptxHost.call(\"" << prefix << "_s_" << property.name
+             << "_get\")\n";
     if (property.setter)
-      object << " set(value) { " << prefix << "_s_" << property.name << "_set(value) }\n";
+      object << " set(value) { __scriptxHost.call(\"" << prefix << "_s_" << property.name
+             << "_set\", value) }\n";
   }
   object << "}\n";
 

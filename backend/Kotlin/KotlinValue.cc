@@ -262,12 +262,13 @@ Local<ByteBuffer> ByteBuffer::newByteBuffer(void* nativeBuffer, size_t size) {
 }
 Local<ByteBuffer> ByteBuffer::newByteBuffer(std::shared_ptr<void> nativeBuffer, size_t size) {
   auto* jni = kotlin_backend::env();
-  jbyteArray array = jni->NewByteArray(static_cast<jsize>(size));
-  if (size) jni->SetByteArrayRegion(array, 0, static_cast<jsize>(size),
-                                    static_cast<const jbyte*>(nativeBuffer.get()));
-  auto value = kotlin_backend::wrapValue(array, ValueKind::kByteBuffer);
+  if (!nativeBuffer) throw Exception("Kotlin ByteBuffer requires native storage");
+  jobject buffer = jni->NewDirectByteBuffer(nativeBuffer.get(), static_cast<jlong>(size));
+  kotlin_backend::check(jni, "creating direct Kotlin ByteBuffer");
+  auto value = kotlin_backend::wrapValue(buffer, ValueKind::kByteBuffer);
   value->nativeBytes = std::move(nativeBuffer);
   value->byteLength = size;
+  value->directByteBuffer = true;
   return KotlinInterop::toLocal<ByteBuffer>(std::move(value));
 }
 
@@ -363,14 +364,32 @@ Local<Value> Local<Function>::callImpl(const Local<Value>& thiz, size_t size,
   auto* jni = kotlin_backend::env();
   jclass type = jni->GetObjectClass(kotlin_backend::object(val_));
   jmethodID invoke = jni->GetMethodID(type, "invoke", "([Ljava/lang/Object;)Ljava/lang/Object;");
-  jclass objectClass = jni->FindClass("java/lang/Object");
-  jobjectArray javaArgs = jni->NewObjectArray(static_cast<jsize>(size), objectClass, nullptr);
-  for (size_t i = 0; i < size; ++i)
-    jni->SetObjectArrayElement(javaArgs, static_cast<jsize>(i), kotlin_backend::object(args[i].val_));
-  jobject result = jni->CallObjectMethod(kotlin_backend::object(val_), invoke, javaArgs);
+  jobject result = nullptr;
+  if (invoke) {
+    jclass objectClass = jni->FindClass("java/lang/Object");
+    jobjectArray javaArgs = jni->NewObjectArray(static_cast<jsize>(size), objectClass, nullptr);
+    for (size_t i = 0; i < size; ++i)
+      jni->SetObjectArrayElement(javaArgs, static_cast<jsize>(i),
+                                 kotlin_backend::object(args[i].val_));
+    result = jni->CallObjectMethod(kotlin_backend::object(val_), invoke, javaArgs);
+    jni->DeleteLocalRef(javaArgs);
+    jni->DeleteLocalRef(objectClass);
+  } else {
+    // Kotlin lambdas implement Function$arity with invoke(Object, ...), while
+    // ScriptX's Java NativeFunction uses invoke(Object[]). Support both forms.
+    if (jni->ExceptionCheck()) jni->ExceptionClear();
+    std::string signature("(");
+    for (size_t i = 0; i < size; ++i) signature += "Ljava/lang/Object;";
+    signature += ")Ljava/lang/Object;";
+    invoke = jni->GetMethodID(type, "invoke", signature.c_str());
+    kotlin_backend::check(jni, "resolving Kotlin lambda");
+    std::vector<jvalue> javaArgs(size);
+    for (size_t i = 0; i < size; ++i)
+      javaArgs[i].l = kotlin_backend::object(args[i].val_);
+    result = jni->CallObjectMethodA(kotlin_backend::object(val_), invoke,
+                                    javaArgs.empty() ? nullptr : javaArgs.data());
+  }
   kotlin_backend::check(jni, "calling Kotlin Function");
-  jni->DeleteLocalRef(javaArgs);
-  jni->DeleteLocalRef(objectClass);
   jni->DeleteLocalRef(type);
   return KotlinInterop::toLocal<Value>(kotlin_backend::wrapValue(result));
 }
@@ -426,21 +445,36 @@ void Local<Array>::clear() const {
 }
 
 ByteBuffer::Type Local<ByteBuffer>::getType() const { return ByteBuffer::Type::kInt8; }
-bool Local<ByteBuffer>::isShared() const { return false; }
+bool Local<ByteBuffer>::isShared() const { return val_ && val_->directByteBuffer; }
 void Local<ByteBuffer>::commit() const {
+  if (val_->directByteBuffer) return;
   if (!val_->nativeBytes || !val_->byteLength) return;
   kotlin_backend::env()->SetByteArrayRegion(
       static_cast<jbyteArray>(val_->object), 0, static_cast<jsize>(val_->byteLength),
       static_cast<const jbyte*>(val_->nativeBytes.get()));
 }
 void Local<ByteBuffer>::sync() const {
+  if (val_->directByteBuffer) return;
   if (!val_->nativeBytes || !val_->byteLength) return;
   kotlin_backend::env()->GetByteArrayRegion(static_cast<jbyteArray>(val_->object), 0,
                                            static_cast<jsize>(val_->byteLength),
                                            static_cast<jbyte*>(val_->nativeBytes.get()));
 }
-size_t Local<ByteBuffer>::byteLength() const { return val_->byteLength; }
-void* Local<ByteBuffer>::getRawBytes() const { return val_->nativeBytes.get(); }
-std::shared_ptr<void> Local<ByteBuffer>::getRawBytesShared() const { return val_->nativeBytes; }
+size_t Local<ByteBuffer>::byteLength() const { return val_ ? val_->byteLength : 0; }
+void* Local<ByteBuffer>::getRawBytes() const {
+  if (!val_) return nullptr;
+  if (val_->directByteBuffer) {
+    return kotlin_backend::env()->GetDirectBufferAddress(static_cast<jobject>(val_->object));
+  }
+  return val_->nativeBytes.get();
+}
+std::shared_ptr<void> Local<ByteBuffer>::getRawBytesShared() const {
+  if (!val_) return {};
+  if (val_->directByteBuffer) {
+    auto pointer = kotlin_backend::env()->GetDirectBufferAddress(static_cast<jobject>(val_->object));
+    return std::shared_ptr<void>(val_, pointer);
+  }
+  return val_->nativeBytes;
+}
 
 }  // namespace script

@@ -1,7 +1,8 @@
 # Kotlin backend
 
-The Kotlin backend embeds one JVM in the host process and evaluates Kotlin/JVM scripts through
-the Kotlin JSR-223 `main-kts` engine. It is selected like the other backends:
+The Kotlin backend embeds one JVM in the host process. `ScriptEngine::loadFile` is JAR-only:
+it loads a compiled Kotlin/JVM `.jar` and invokes the standard JAR `Main-Class` entry point.
+It is selected like the other backends:
 
 ```sh
 cmake -S . -B build -DSCRIPTX_BACKEND=Kotlin
@@ -12,10 +13,10 @@ the runtime JAR classpath. The deployed application needs a compatible JDK/JRE w
 other backends do not require Kotlin or a JVM installation.
 
 `ScriptEngine::set` exports primitive values, arrays, objects, byte buffers, and native functions
-into the same JVM script environment, while `eval` and `loadFile` convert results back to ScriptX
-values. Native function callbacks synchronously cross JNI into C++, so no external `kotlinc`
-process is started. The JVM owns object lifetime and garbage collection; `gc()` cannot force JVM
-collection, and `ByteBuffer` uses explicit copy/commit/sync semantics.
+into the JVM host. `eval` remains available for in-memory diagnostics, while `loadFile` refuses
+`.kt`/`.kts` source files and accepts only compiled JARs. Native function callbacks synchronously
+cross JNI into C++, so no external `kotlinc` process is started. `gc()` requests JVM collection,
+and direct `ByteBuffer` values share their native backing memory without copy/commit/sync steps.
 
 Value, array, object, function, native-function callback, and native-class behavior is available
 in-process. `registerNativeClass/newNativeClass` generates Kotlin-visible wrappers for
@@ -24,4 +25,5 @@ constructors, static/instance functions, static/instance properties, and the C++
 avoid identifiers beginning with `__scriptx_native_`.
 Because C++ callbacks have no Kotlin static return type, bound functions and properties have the
 Kotlin type `Any?`; cast before using a value in a Kotlin-specific operation (for example,
-`(Box.twice(2) as Number).toInt()`).
+`(Box.twice(2) as Number).toInt()`). ScriptX's V8 Inspector protocol is not implemented by the
+JVM backend; use the JVM JDWP debugger for compiled JARs instead.

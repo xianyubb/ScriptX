@@ -14,15 +14,20 @@ endif ()
 
 set(SCRIPTX_KOTLIN_HOST_CLASSES "${CMAKE_CURRENT_BINARY_DIR}/ScriptXKotlinHostClasses")
 set(SCRIPTX_KOTLIN_HOST_JAR "${CMAKE_CURRENT_BINARY_DIR}/ScriptXKotlinHost.jar")
+file(GLOB_RECURSE SCRIPTX_KOTLIN_HOST_SOURCES
+        "${CMAKE_CURRENT_LIST_DIR}/jvm/*.kt")
 file(MAKE_DIRECTORY "${SCRIPTX_KOTLIN_HOST_CLASSES}")
 execute_process(
-        COMMAND "${Java_JAVAC_EXECUTABLE}" -d "${SCRIPTX_KOTLIN_HOST_CLASSES}"
-                "${CMAKE_CURRENT_LIST_DIR}/jvm/ScriptXKotlinHost.java"
+        COMMAND "${SCRIPTX_KOTLIN_EXECUTABLE}"
+                -jvm-target 1.8
+                -jvm-default=enable
+                -d "${SCRIPTX_KOTLIN_HOST_CLASSES}"
+                ${SCRIPTX_KOTLIN_HOST_SOURCES}
         RESULT_VARIABLE SCRIPTX_KOTLIN_HOST_COMPILE_RESULT
         OUTPUT_VARIABLE SCRIPTX_KOTLIN_HOST_COMPILE_OUTPUT
         ERROR_VARIABLE SCRIPTX_KOTLIN_HOST_COMPILE_ERROR)
 if (NOT SCRIPTX_KOTLIN_HOST_COMPILE_RESULT EQUAL 0)
-    message(FATAL_ERROR "Failed to compile ScriptX Kotlin JVM host:\n"
+    message(FATAL_ERROR "Failed to compile Kotlin ScriptX JVM host:\n"
             "${SCRIPTX_KOTLIN_HOST_COMPILE_OUTPUT}${SCRIPTX_KOTLIN_HOST_COMPILE_ERROR}")
 endif ()
 execute_process(
@@ -58,6 +63,7 @@ target_sources(ScriptX PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}/KotlinEngine.cc
         ${CMAKE_CURRENT_LIST_DIR}/KotlinEngine.h
         ${CMAKE_CURRENT_LIST_DIR}/KotlinException.cc
+        ${CMAKE_CURRENT_LIST_DIR}/KotlinInspector.cc
         ${CMAKE_CURRENT_LIST_DIR}/KotlinNative.cc
         ${CMAKE_CURRENT_LIST_DIR}/KotlinNative.hpp
         ${CMAKE_CURRENT_LIST_DIR}/KotlinReference.hpp

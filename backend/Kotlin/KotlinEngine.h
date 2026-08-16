@@ -49,6 +49,10 @@ class KotlinEngine : public ScriptEngine {
 
   JniObject host() const { return host_; }
   KotlinValuePtr wrap(JniObject object) const { return wrapValue(object); }
+  int64_t loadCompiledPlugin(const std::string& jarPath, const std::string& mainClass,
+                             const std::string& pluginName);
+  void enableCompiledPlugin(int64_t pluginHandle);
+  void unloadCompiledPlugin(int64_t pluginHandle);
   Local<Object> newNativeInstanceForExisting(void* pointer,
                                              const internal::ClassDefineState* classDefine);
 

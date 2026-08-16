@@ -13,7 +13,8 @@ template <typename T>
 Global<T>::Global(const Local<T>& localReference) : val_(localReference.val_) {}
 
 template <typename T>
-Global<T>::Global(const Weak<T>& weakReference) : val_(weakReference.val_.lock()) {}
+Global<T>::Global(const Weak<T>& weakReference)
+    : val_(kotlin_backend::lockWeakValue(weakReference.val_)) {}
 
 template <typename T>
 Global<T>::Global(const Global<T>& copy) : val_(copy.val_) {}
@@ -75,10 +76,12 @@ template <typename T>
 Weak<T>::~Weak() = default;
 
 template <typename T>
-Weak<T>::Weak(const Local<T>& localReference) : val_(localReference.val_) {}
+Weak<T>::Weak(const Local<T>& localReference)
+    : val_(kotlin_backend::makeWeakValue(localReference.val_)) {}
 
 template <typename T>
-Weak<T>::Weak(const Global<T>& globalReference) : val_(globalReference.val_) {}
+Weak<T>::Weak(const Global<T>& globalReference)
+    : val_(kotlin_backend::makeWeakValue(globalReference.val_)) {}
 
 template <typename T>
 Weak<T>::Weak(const Weak<T>& copy) : val_(copy.val_) {}
@@ -111,19 +114,19 @@ Weak<T>& Weak<T>::operator=(const Local<T>& assign) {
 
 template <typename T>
 Local<T> Weak<T>::get() const {
-  auto value = val_.lock();
+  auto value = kotlin_backend::lockWeakValue(val_);
   if (!value) throw Exception("get on empty or expired Weak");
   return Local<T>(std::move(value));
 }
 
 template <typename T>
 Local<Value> Weak<T>::getValue() const {
-  return Local<Value>(val_.lock());
+  return Local<Value>(kotlin_backend::lockWeakValue(val_));
 }
 
 template <typename T>
 bool Weak<T>::isEmpty() const {
-  return val_.expired();
+  return !kotlin_backend::lockWeakValue(val_);
 }
 
 template <typename T>
